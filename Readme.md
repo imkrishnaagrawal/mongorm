@@ -26,3 +26,141 @@ If you've found Mongorm useful for your projects or are interested in contributi
 
 ```sh
 go get github.com/imkrishnaagrawal/mongorm
+
+
+## Examples
+
+
+```go
+package config
+
+import (
+	"context"
+	"log"
+
+	"github.com/imkrishnaagrawal/mongorm"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+var MORM *mongorm.MongoORM
+
+func Connect() {
+	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI("mongodb://rootuser:rootpass@localhost:27017"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	MORM = mongorm.NewMongoORM(
+		client,
+		"testDb",
+	)
+
+}
+
+```
+
+```go
+package models
+
+import (
+	"github.com/imkrishnaagrawal/mongorm"
+)
+
+type User struct {
+	mongorm.OrmModel `bson:",inline"`
+	Username         string `json:"username" bson:"username,omitempty"`
+	Email            string `json:"email" bson:"email,omitempty"`
+	FullName         string `json:"full_name" bson:"full_name,omitempty"`
+	PasswordHash     string `json:"-" bson:"password_hash,omitempty"` // Excluded from JSON responses
+}
+```
+
+```go
+package controllers
+
+import (
+	"context"
+	"net/http"
+	"yourproject/models" // Adjust the import path according to your project structure
+	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
+
+// Assuming config.DB is a *mongo.Client instance
+
+func GetUser(c *gin.Context) {
+	var user models.User
+
+	if err := config.MORM.First(&user, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	}
+
+	c.JSON(http.StatusOK, &user)
+}
+
+func GetUsers(c *gin.Context) {
+	var users []models.User
+
+	if err := config.MORM.Find(&users).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	}
+
+	c.JSON(http.StatusOK, &users)
+}
+
+func CreateUser(c *gin.Context) {
+	var user models.User
+	if err := c.BindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := config.MORM.Create(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, &user)
+}
+
+func UpdateUser(c *gin.Context) {
+	var user models.User
+
+	if err := config.MORM.Where("id = ?", c.Param("id")).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	if err := c.BindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := config.MORM.Save(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
+}
+
+func DeleteUser(c *gin.Context) {
+	var user models.User
+
+	if result := config.MORM.Where("id = ?", c.Param("id")).Delete(&user); result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User deleted"})
+}
+
+func UserRouter(router *gin.Engine) {
+	router.GET("/users/:id", GetUser)
+	router.GET("/users", GetUsers)
+	router.POST("/users", CreateUser)
+	router.PATCH("/users/:id", UpdateUser)
+	router.DELETE("/users/:id", DeleteUser)
+}
+```
